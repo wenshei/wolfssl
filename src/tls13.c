@@ -29,8 +29,9 @@
  *    Enables session tickets - required for TLS 1.3 resumption.
  * NO_PSK
  *    Do not enable Pre-Shared Keys.
- * HAVE_KEYING_MATERIAL
- *    Enables exporting keying material based on section 7.5 of RFC 8446.
+ * TLS13_SUPPORTS_EXPORTERS
+ *    Guard to compile out any code for exporter keys.
+ *    Feature not supported yet.
  * WOLFSSL_ASYNC_CRYPT
  *    Enables the use of asynchronous cryptographic operations.
  *    This is available for ciphers and certificates.
@@ -126,6 +127,10 @@
     #endif
 #endif
 
+//@yqq
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
+//#yqq
 
 /* Set ret to error value and jump to label.
  *
@@ -238,10 +243,8 @@ static int HKDF_Expand_Label(byte* okm, word32 okmLen,
     /* Length of hash of messages */
     data[idx++] = (byte)infoLen;
     /* Hash of messages */
-    if (info != NULL && infoLen > 0) {
-        XMEMCPY(&data[idx], info, infoLen);
-        idx += infoLen;
-    }
+    XMEMCPY(&data[idx], info, infoLen);
+    idx += infoLen;
 
 #ifdef WOLFSSL_DEBUG_TLS
     WOLFSSL_MSG("  PRK");
@@ -516,7 +519,7 @@ static int DeriveEarlyTrafficSecret(WOLFSSL* ssl, byte* key)
     return ret;
 }
 
-#ifdef HAVE_KEYING_MATERIAL
+#ifdef TLS13_SUPPORTS_EXPORTERS
 /* The length of the early exporter label. */
 #define EARLY_EXPORTER_LABEL_SZ     12
 /* The early exporter label. */
@@ -689,7 +692,7 @@ static int DeriveServerTrafficSecret(WOLFSSL* ssl, byte* key)
     return ret;
 }
 
-#ifdef HAVE_KEYING_MATERIAL
+#ifdef TLS13_SUPPORTS_EXPORTERS
 /* The length of the exporter master secret label. */
 #define EXPORTER_MASTER_LABEL_SZ    10
 /* The exporter master secret label. */
@@ -705,7 +708,7 @@ static const byte exporterMasterLabel[EXPORTER_MASTER_LABEL_SZ + 1] =
 static int DeriveExporterSecret(WOLFSSL* ssl, byte* key)
 {
     int ret;
-    WOLFSSL_ENTER("Derive Exporter Secret");
+    WOLFSSL_MSG("Derive Exporter Secret");
     if (ssl == NULL || ssl->arrays == NULL) {
         return BAD_FUNC_ARG;
     }
@@ -721,104 +724,6 @@ static int DeriveExporterSecret(WOLFSSL* ssl, byte* key)
         }
     }
 #endif /* HAVE_SECRET_CALLBACK */
-    return ret;
-}
-
-/* The length of the exporter label. */
-#define EXPORTER_LABEL_SZ    8
-/* The exporter label. */
-static const byte exporterLabel[EXPORTER_LABEL_SZ + 1] =
-    "exporter";
-/* Hash("") */
-#ifndef NO_SHA256
-static const byte emptySHA256Hash[] = {
-    0xE3, 0xB0, 0xC4, 0x42, 0x98, 0xFC, 0x1C, 0x14, 0x9A, 0xFB, 0xF4, 0xC8,
-    0x99, 0x6F, 0xB9, 0x24, 0x27, 0xAE, 0x41, 0xE4, 0x64, 0x9B, 0x93, 0x4C,
-    0xA4, 0x95, 0x99, 0x1B, 0x78, 0x52, 0xB8, 0x55
-};
-#endif
-#ifdef WOLFSSL_SHA384
-static const byte emptySHA384Hash[] = {
-    0x38, 0xB0, 0x60, 0xA7, 0x51, 0xAC, 0x96, 0x38, 0x4C, 0xD9, 0x32, 0x7E,
-    0xB1, 0xB1, 0xE3, 0x6A, 0x21, 0xFD, 0xB7, 0x11, 0x14, 0xBE, 0x07, 0x43,
-    0x4C, 0x0C, 0xC7, 0xBF, 0x63, 0xF6, 0xE1, 0xDA, 0x27, 0x4E, 0xDE, 0xBF,
-    0xE7, 0x6F, 0x65, 0xFB, 0xD5, 0x1A, 0xD2, 0xF1, 0x48, 0x98, 0xB9, 0x5B
-};
-#endif
-#ifdef WOLFSSL_TLS13_SHA512
-static const byte emptySHA512Hash[] = {
-    0xCF, 0x83, 0xE1, 0x35, 0x7E, 0xEF, 0xB8, 0xBD, 0xF1, 0x54, 0x28, 0x50,
-    0xD6, 0x6D, 0x80, 0x07, 0xD6, 0x20, 0xE4, 0x05, 0x0B, 0x57, 0x15, 0xDC,
-    0x83, 0xF4, 0xA9, 0x21, 0xD3, 0x6C, 0xE9, 0xCE, 0x47, 0xD0, 0xD1, 0x3C,
-    0x5D, 0x85, 0xF2, 0xB0, 0xFF, 0x83, 0x18, 0xD2, 0x87, 0x7E, 0xEC, 0x2F,
-    0x63, 0xB9, 0x31, 0xBD, 0x47, 0x41, 0x7A, 0x81, 0xA5, 0x38, 0x32, 0x7A,
-    0xF9, 0x27, 0xDA, 0x3E
-};
-#endif
-/**
- * Implement section 7.5 of RFC 8446
- * @return  0 on success
- *         <0 on failure
- */
-int Tls13_Exporter(WOLFSSL* ssl, unsigned char *out, size_t outLen,
-        const char *label, size_t labelLen,
-        const unsigned char *context, size_t contextLen)
-{
-    int                 ret;
-    enum wc_HashType    hashType = WC_HASH_TYPE_NONE;
-    int                 hashLen = 0;
-    byte                hashOut[WC_MAX_DIGEST_SIZE];
-    const byte*         emptyHash = NULL;
-    byte                firstExpand[WC_MAX_DIGEST_SIZE];
-    const byte*         protocol = tls13ProtocolLabel;
-    word32              protocolLen = TLS13_PROTOCOL_LABEL_SZ;
-
-    if (ssl->version.minor != TLSv1_3_MINOR)
-        return VERSION_ERROR;
-
-    switch (ssl->specs.mac_algorithm) {
-        #ifndef NO_SHA256
-        case sha256_mac:
-            hashType  = WC_HASH_TYPE_SHA256;
-            hashLen   = WC_SHA256_DIGEST_SIZE;
-            emptyHash = emptySHA256Hash;
-            break;
-        #endif
-
-        #ifdef WOLFSSL_SHA384
-        case sha384_mac:
-            hashType  = WC_HASH_TYPE_SHA384;
-            hashLen   = WC_SHA384_DIGEST_SIZE;
-            emptyHash = emptySHA384Hash;
-            break;
-        #endif
-
-        #ifdef WOLFSSL_TLS13_SHA512
-        case sha512_mac:
-            hashType  = WC_HASH_TYPE_SHA512;
-            hashLen   = WC_SHA512_DIGEST_SIZE;
-            emptyHash = emptySHA512Hash;
-            break;
-        #endif
-    }
-
-    /* Derive-Secret(Secret, label, "") */
-    ret = HKDF_Expand_Label(firstExpand, hashLen,
-            ssl->arrays->exporterSecret, hashLen,
-            protocol, protocolLen, (byte*)label, (word32)labelLen,
-            emptyHash, hashLen, hashType);
-    if (ret != 0)
-        return ret;
-
-    /* Hash(context_value) */
-    ret = wc_Hash(hashType, context, (word32)contextLen, hashOut, WC_MAX_DIGEST_SIZE);
-    if (ret != 0)
-        return ret;
-
-    ret = HKDF_Expand_Label(out, (word32)outLen, firstExpand, hashLen,
-            protocol, protocolLen, exporterLabel, EXPORTER_LABEL_SZ,
-            hashOut, hashLen, hashType);
-
     return ret;
 }
 #endif
@@ -961,19 +866,9 @@ int DeriveMasterSecret(WOLFSSL* ssl)
     if (ret != 0)
         return ret;
 
-    ret = Tls13_HKDF_Extract(ssl->arrays->masterSecret,
+    return Tls13_HKDF_Extract(ssl->arrays->masterSecret,
             key, ssl->specs.hash_size,
             ssl->arrays->masterSecret, 0, ssl->specs.mac_algorithm);
-
-#ifdef HAVE_KEYING_MATERIAL
-    if (ret != 0)
-        return ret;
-    /* Calculate exporter secret only when saving arrays */
-    if (ssl->options.saveArrays)
-        ret = DeriveExporterSecret(ssl, ssl->arrays->exporterSecret);
-#endif
-
-    return ret;
 }
 
 #if defined(HAVE_SESSION_TICKET)
@@ -1470,23 +1365,6 @@ end:
         return (word32)(ktime_get_real_ns() / (ktime_t)1000000);
     #endif
     }
-#elif defined(FUSION_RTOS)
-    /* The time in milliseconds.
-     * Used for tickets to represent difference between when first seen and when
-     * sending.
-     *
-     * returns the time in milliseconds as a 32-bit value.
-     */
-    word32 TimeNowInMilliseconds(void)
-    {
-        struct timeval now;
-        if (FCL_GETTIMEOFDAY(&now, 0) < 0)
-            return (word32)GETTIME_ERROR; /* TODO: return 0 for failure */
-
-        /* Convert to milliseconds number. */
-        return (word32)(now.tv_sec * 1000 + now.tv_usec / 1000);
-    }
-
 #else
     /* The time in milliseconds.
      * Used for tickets to represent difference between when first seen and when
@@ -1499,8 +1377,7 @@ end:
         struct timeval now;
 
         if (gettimeofday(&now, 0) < 0)
-            return (word32)GETTIME_ERROR; /* TODO: return 0 for failure */
-
+            return GETTIME_ERROR;
         /* Convert to milliseconds number. */
         return (word32)(now.tv_sec * 1000 + now.tv_usec / 1000);
     }
@@ -3008,19 +2885,8 @@ int DoTls13ServerHello(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
     if ((i - begin) + RAN_LEN + ENUM_LEN > helloSz)
         return BUFFER_ERROR;
 
-    if (XMEMCMP(input + i, helloRetryRequestRandom, RAN_LEN) == 0) {
+    if (XMEMCMP(input + i, helloRetryRequestRandom, RAN_LEN) == 0)
         *extMsgType = hello_retry_request;
-        /* A HelloRetryRequest comes in as an ServerHello for MiddleBox compat.
-         * Found message to be a HelloRetryRequest.
-         * Don't allow more than one HelloRetryRequest or ServerHello.
-         */
-        if (ssl->msgsReceived.got_hello_retry_request == 1) {
-            return DUPLICATE_MSG_E;
-        }
-        /* Update counts to reflect change of message type. */
-        ssl->msgsReceived.got_hello_retry_request++;
-        ssl->msgsReceived.got_server_hello--;
-    }
 
     /* Server random - keep for debugging. */
     XMEMCPY(ssl->arrays->serverRandom, input + i, RAN_LEN);
@@ -5762,36 +5628,28 @@ static int DoTls13CertificateVerify(WOLFSSL* ssl, byte* input,
         #ifdef HAVE_ED25519
             if (args->sigAlgo == ed25519_sa_algo &&
                                                   !ssl->peerEd25519KeyPresent) {
-                WOLFSSL_MSG("Peer sent ED22519 sig but not ED22519 cert");
-                ret = SIG_VERIFY_E;
-                goto exit_dcv;
+                WOLFSSL_MSG("Oops, peer sent ED25519 key but not in verify");
             }
         #endif
         #ifdef HAVE_ED448
             if (args->sigAlgo == ed448_sa_algo && !ssl->peerEd448KeyPresent) {
-                WOLFSSL_MSG("Peer sent ED448 sig but not ED448 cert");
-                ret = SIG_VERIFY_E;
-                goto exit_dcv;
+                WOLFSSL_MSG("Oops, peer sent ED448 key but not in verify");
             }
         #endif
         #ifdef HAVE_ECC
             if (args->sigAlgo == ecc_dsa_sa_algo &&
                                                    !ssl->peerEccDsaKeyPresent) {
-                WOLFSSL_MSG("Peer sent ECC sig but not ECC cert");
-                ret = SIG_VERIFY_E;
-                goto exit_dcv;
+                WOLFSSL_MSG("Oops, peer sent ECC key but not in verify");
             }
         #endif
         #ifndef NO_RSA
             if (args->sigAlgo == rsa_sa_algo) {
-                WOLFSSL_MSG("Peer sent PKCS#1.5 algo but not in certificate");
+                WOLFSSL_MSG("Oops, peer sent PKCS#1.5 signature");
                 ERROR_OUT(INVALID_PARAMETER, exit_dcv);
             }
             if (args->sigAlgo == rsa_pss_sa_algo &&
                          (ssl->peerRsaKey == NULL || !ssl->peerRsaKeyPresent)) {
-                WOLFSSL_MSG("Peer sent RSA sig but not RSA cert");
-                ret = SIG_VERIFY_E;
-                goto exit_dcv;
+                WOLFSSL_MSG("Oops, peer sent RSA key but not in verify");
             }
         #endif
 
@@ -6880,6 +6738,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
             }
             if (ssl->msgsReceived.got_client_hello == 2) {
                 WOLFSSL_MSG("Too many ClientHello received");
+                //@yqq
+                DMSG("too many clienthello received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_client_hello++;
@@ -6895,8 +6756,11 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
                 return OUT_OF_ORDER_E;
             }
         #endif
-            if (ssl->msgsReceived.got_server_hello == 1) {
+            if (ssl->msgsReceived.got_server_hello == 2) {
                 WOLFSSL_MSG("Duplicate ServerHello received");
+                //@yqq
+                DMSG("duplicate serverhello received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_server_hello++;
@@ -6940,6 +6804,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
             }
             if (ssl->msgsReceived.got_end_of_early_data == 1) {
                 WOLFSSL_MSG("Too many EndOfEarlyData received");
+                //@yqq
+                DMSG("too many endofearlydata received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_end_of_early_data++;
@@ -6962,6 +6829,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
             }
             if (ssl->msgsReceived.got_encrypted_extensions) {
                 WOLFSSL_MSG("Duplicate EncryptedExtensions received");
+                //@yqq
+                DMSG("duplicate encryptedextensions received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_encrypted_extensions = 1;
@@ -6996,6 +6866,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
     #endif
             if (ssl->msgsReceived.got_certificate) {
                 WOLFSSL_MSG("Duplicate Certificate received");
+                //@yqq
+                DMSG("duplicate certificate received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_certificate = 1;
@@ -7038,6 +6911,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
         #ifndef WOLFSSL_POST_HANDSHAKE_AUTH
             if (ssl->msgsReceived.got_certificate_request) {
                 WOLFSSL_MSG("Duplicate CertificateRequest received");
+                //@yqq
+                DMSG("duplicate certificaterequest received");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
         #endif
@@ -7082,6 +6958,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
     #endif
             if (ssl->msgsReceived.got_certificate_verify) {
                 WOLFSSL_MSG("Duplicate CertificateVerify received");
+                //@yqq
+                DMSG("duplicate certificateverify recevied\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_certificate_verify = 1;
@@ -7132,6 +7011,9 @@ static int SanityCheckTls13MsgReceived(WOLFSSL* ssl, byte type)
         #endif
             if (ssl->msgsReceived.got_finished) {
                 WOLFSSL_MSG("Duplicate Finished received");
+                //@yqq
+                DMSG("duplicate finished received\n");
+                //#yqq
                 return DUPLICATE_MSG_E;
             }
             ssl->msgsReceived.got_finished = 1;
@@ -7604,15 +7486,6 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
                 }
             }
 
-            if (!ssl->options.tls1_3) {
-    #ifndef WOLFSSL_NO_TLS12
-                if (ssl->options.downgrade)
-                    return wolfSSL_connect(ssl);
-    #endif
-                WOLFSSL_MSG("Client using higher version, fatal error");
-                return VERSION_ERROR;
-            }
-
             ssl->options.connectState = HELLO_AGAIN;
             WOLFSSL_MSG("connect state: HELLO_AGAIN");
             FALL_THROUGH;
@@ -7620,6 +7493,16 @@ int wolfSSL_connect_TLSv13(WOLFSSL* ssl)
         case HELLO_AGAIN:
             if (ssl->options.certOnly)
                 return WOLFSSL_SUCCESS;
+
+            if (!ssl->options.tls1_3) {
+    #ifndef WOLFSSL_NO_TLS12
+                if (ssl->options.downgrade)
+                    return wolfSSL_connect(ssl);
+    #endif
+
+                WOLFSSL_MSG("Client using higher version, fatal error");
+                return VERSION_ERROR;
+            }
 
             if (ssl->options.serverState ==
                                           SERVER_HELLO_RETRY_REQUEST_COMPLETE) {
@@ -7972,24 +7855,6 @@ int wolfSSL_update_keys(WOLFSSL* ssl)
     return ret;
 }
 
-/* Whether a response is waiting for key update request.
- *
- * ssl        The SSL/TLS object.
- * required   0 when no key update response required.
- *            1 when no key update response required.
- * return  0 on success.
- * return  BAD_FUNC_ARG when ssl is NULL or not using TLS v1.3
- */
-int wolfSSL_key_update_response(WOLFSSL* ssl, int* required)
-{
-    if (required == NULL || ssl == NULL || !IsAtLeastTLSv1_3(ssl->version))
-        return BAD_FUNC_ARG;
-
-    *required = ssl->keys.updateResponseReq;
-
-    return 0;
-}
-
 #if !defined(NO_CERTS) && defined(WOLFSSL_POST_HANDSHAKE_AUTH)
 /* Allow post-handshake authentication in TLS v1.3 connections.
  *
@@ -8108,7 +7973,7 @@ int wolfSSL_preferred_group(WOLFSSL* ssl)
 }
 #endif
 
-#if defined(HAVE_SUPPORTED_CURVES)
+#ifdef HAVE_SUPPORTED_CURVES
 /* Sets the key exchange groups in rank order on a context.
  *
  * ctx     SSL/TLS context object.
@@ -8119,26 +7984,15 @@ int wolfSSL_preferred_group(WOLFSSL* ssl)
  */
 int wolfSSL_CTX_set_groups(WOLFSSL_CTX* ctx, int* groups, int count)
 {
-    int ret, i;
+    int i;
 
-    WOLFSSL_ENTER("wolfSSL_CTX_set_groups");
     if (ctx == NULL || groups == NULL || count > WOLFSSL_MAX_GROUP_COUNT)
         return BAD_FUNC_ARG;
     if (!IsAtLeastTLSv1_3(ctx->method->version))
         return BAD_FUNC_ARG;
 
-    ctx->numGroups = 0;
-    TLSX_Remove(&ctx->extensions, TLSX_SUPPORTED_GROUPS, ctx->heap);
-    for (i = 0; i < count; i++) {
-        /* Call to wolfSSL_CTX_UseSupportedCurve also checks if input groups
-         * are valid */
-        if ((ret = wolfSSL_CTX_UseSupportedCurve(ctx, (word16)groups[i]))
-                != WOLFSSL_SUCCESS) {
-            TLSX_Remove(&ctx->extensions, TLSX_SUPPORTED_GROUPS, ctx->heap);
-            return ret;
-        }
-        ctx->group[i] = groups[i];
-    }
+    for (i = 0; i < count; i++)
+        ctx->group[i] = (word16)groups[i];
     ctx->numGroups = (byte)count;
 
     return WOLFSSL_SUCCESS;
@@ -8154,31 +8008,20 @@ int wolfSSL_CTX_set_groups(WOLFSSL_CTX* ctx, int* groups, int count)
  */
 int wolfSSL_set_groups(WOLFSSL* ssl, int* groups, int count)
 {
-    int ret, i;
+    int i;
 
-    WOLFSSL_ENTER("wolfSSL_set_groups");
     if (ssl == NULL || groups == NULL || count > WOLFSSL_MAX_GROUP_COUNT)
         return BAD_FUNC_ARG;
     if (!IsAtLeastTLSv1_3(ssl->version))
         return BAD_FUNC_ARG;
 
-    ssl->numGroups = 0;
-    TLSX_Remove(&ssl->extensions, TLSX_SUPPORTED_GROUPS, ssl->heap);
-    for (i = 0; i < count; i++) {
-        /* Call to wolfSSL_UseSupportedCurve also checks if input groups
-                 * are valid */
-        if ((ret = wolfSSL_UseSupportedCurve(ssl, (word16)groups[i]))
-                != WOLFSSL_SUCCESS) {
-            TLSX_Remove(&ssl->extensions, TLSX_SUPPORTED_GROUPS, ssl->heap);
-            return ret;
-        }
-        ssl->group[i] = groups[i];
-    }
+    for (i = 0; i < count; i++)
+        ssl->group[i] = (word16)groups[i];
     ssl->numGroups = (byte)count;
 
     return WOLFSSL_SUCCESS;
 }
-#endif /* HAVE_SUPPORTED_CURVES */
+#endif
 
 #ifndef NO_PSK
 void wolfSSL_CTX_set_psk_client_tls13_callback(WOLFSSL_CTX* ctx,
@@ -8217,8 +8060,7 @@ void wolfSSL_set_psk_client_tls13_callback(WOLFSSL* ssl,
     InitSuites(ssl->suites, ssl->version, keySz, haveRSA, TRUE,
                ssl->options.haveDH, ssl->options.haveNTRU,
                ssl->options.haveECDSAsig, ssl->options.haveECC,
-               ssl->options.haveStaticECC, ssl->options.haveAnon,
-               ssl->options.side);
+               ssl->options.haveStaticECC, ssl->options.side);
 }
 
 
@@ -8255,8 +8097,7 @@ void wolfSSL_set_psk_server_tls13_callback(WOLFSSL* ssl,
     InitSuites(ssl->suites, ssl->version, keySz, haveRSA, TRUE,
                ssl->options.haveDH, ssl->options.haveNTRU,
                ssl->options.haveECDSAsig, ssl->options.haveECC,
-               ssl->options.haveStaticECC, ssl->options.haveAnon,
-               ssl->options.side);
+               ssl->options.haveStaticECC, ssl->options.side);
 }
 #endif
 
