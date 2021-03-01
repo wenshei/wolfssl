@@ -1,0 +1,21 @@
+Porting WolfSSL to OP-TEE
+
+WolfSSL Release 4.7.0 (February 16, 2021)
+OP-TEE version 3.12.0 (2021-01-20)
+
+---INSTALL WOLFSSL FOR OP-TEE---
+
+Download wolfssl from https://github.com/wenshei/wolfssl
+
+$ ./autogen.sh
+
+$ ./configure -prefix="/home/ubuntu/projects/wolfssl" LIBS="-lc -lm -lgcc -l:libutee.a" --enable-examples=no --enable-crypttests=no --enable-valgrind=no --enable-iopool=no --enable-static --enable-singlethreaded=yes --host=arm-linux-gnueabihf CC=/home/ubuntu/Desktop/optee/toolchains/aarch32/bin/arm-linux-gnueabihf-gcc AR=/home/ubuntu/Desktop/optee/toolchains/aarch32/bin/arm-linux-gnueabihf-ar RANLIB=/home/ubuntu/Desktop/optee/toolchains/aarch32/bin/arm-linux-gnueabihf-ranlib --enable-filesystem=no CFLAGS="-fPIC -DNO_WOLFSSL_SERVER -DWOLFSSL_USER_IO -DNO_WRITEV -DWOLFSSL_DH_CONST -DNO_DEV_RANDOM -DUSER_TIME -DXMALLOC_USER -I/home/ubuntu/Desktop/wolfssl/include -I/home/ubuntu/Desktop/optee/optee_os/lib/libutee/include  -I/home/ubuntu/Desktop/optee/optee_os/lib/libutils/ext/include -I/home/ubuntu/Desktop/optee/optee_os/lib/libutils/isoc/include" LDFLAGS="-L/home/ubuntu/Desktop/wolfssl/lib" 
+(change the filepaths accordingly)
+
+$ make
+
+$ sudo make install
+
+Copy libwolfssl.a to TA folder
+
+Refer to install_ta_app makefiles
