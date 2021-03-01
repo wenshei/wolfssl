@@ -32,6 +32,8 @@ that can be serialized and deserialized in a cross-platform way.
 #endif
 
 #include <wolfssl/wolfcrypt/settings.h>
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
 
 /*
 ASN Options:
@@ -167,6 +169,66 @@ int tsip_tls_CertVerify(const byte *cert, word32 certSz,
                         word32 key_e_start, word32 key_e_len,
                         byte *tsip_encRsaKeyIdx);
 #endif
+
+//@yqq
+//time_t XTIME(time_t* t);
+
+time_t XTIME(time_t* t) {
+    TEE_Time sys_time;
+    TEE_Result res;
+    DMSG("XTIME called!=============================\n");
+    if (t == NULL) {
+        DMSG("t == NULL\n");
+        //res = TEE_GetTAPersistentTime(&sys_time);
+        //TEE_GetSystemTime(&sys_time);
+        TEE_GetREETime(&sys_time);
+        res = TEE_SUCCESS;
+        //if (res != TEE_SUCCESS) {
+        //    DMSG("TEE_GetTAPersistentTime failed\n");
+        //    return -1;
+        //}
+        //else {
+        //    DMSG("sys_time.seconds: %lu", sys_time.seconds);
+        //    return (time_t)sys_time.seconds;
+        //}
+        switch (res) {
+            case TEE_SUCCESS:
+                DMSG("successed in getting ta persistent time, second: %u, millis: %u\n", sys_time.seconds, sys_time.millis);
+                return (time_t)sys_time.seconds;
+                //break;
+            case TEE_ERROR_OVERFLOW:
+                DMSG("TEE_ERROR_OVERFLOW\n");
+                return -1;
+                //break;
+            case TEE_ERROR_TIME_NOT_SET:
+                DMSG("TEE_ERROR_TIME_NOT_SET\n");
+                return -1;
+                //break;
+            case TEE_ERROR_TIME_NEEDS_RESET:
+                DMSG("TEE_ERROR_TIME_NEEDS_RESET\n");
+                return -1;
+                //break;
+            default:
+                DMSG("TEE_ERROR_TIME_UNKNOWN 0x%x\n", res);
+                return -1;
+        }
+    }
+    else {
+        DMSG("t != NULL\n");
+        res = TEE_GetTAPersistentTime(&sys_time);
+        if (res != TEE_SUCCESS) {
+            DMSG("TEE_GetTAPersistentTime failed\n");
+            return -1;
+        }
+        else {
+            DMSG("sys_time.seconds: %u", sys_time.seconds);
+            return (time_t)sys_time.seconds;
+        }
+        return -1;
+    }
+}
+//#yqq
+
 int GetLength(const byte* input, word32* inOutIdx, int* len,
                            word32 maxIdx)
 {
@@ -384,7 +446,6 @@ static int SetASNNull(byte* output)
     return 2;
 }
 
-#ifndef NO_CERTS
 /* Get the DER/BER encoding of an ASN.1 BOOLEAN.
  *
  * input     Buffer holding DER/BER encoded data.
@@ -414,7 +475,7 @@ static int GetBoolean(const byte* input, word32* inOutIdx, word32 maxIdx)
     *inOutIdx = idx;
     return b;
 }
-#endif /* !NO_CERTS*/
+
 #ifdef ASN1_SET_BOOLEAN
 /* Set the DER/BER encoding of the ASN.1 NULL element.
  * Note: Function not required as yet.
@@ -498,7 +559,6 @@ static int GetASNInt(const byte* input, word32* inOutIdx, int* len,
     return 0;
 }
 
-#ifndef NO_CERTS
 /* Get the DER/BER encoding of an ASN.1 INTEGER that has a value of no more than
  * 7 bits.
  *
@@ -528,7 +588,7 @@ static int GetInteger7Bit(const byte* input, word32* inOutIdx, word32 maxIdx)
     *inOutIdx = idx;
     return b;
 }
-#endif /* !NO_CERTS */
+
 
 #if !defined(NO_DSA) && !defined(NO_SHA)
 static const char sigSha1wDsaName[] = "SHAwDSA";
@@ -2773,7 +2833,7 @@ int ToTraditional(byte* input, word32 sz)
 
 #endif /* HAVE_PKCS8 || HAVE_PKCS12 */
 
-#if defined(HAVE_PKCS8) && !defined(NO_CERTS)
+#ifdef HAVE_PKCS8
 
 /* find beginning of traditional key inside PKCS#8 unencrypted buffer
  * return traditional length on success, with inOutIdx at beginning of
@@ -2867,6 +2927,7 @@ int wc_CreatePKCS8Key(byte* out, word32* outSz, byte* key, word32 keySz,
          *  no header information just INTEGER */
         sz = SetMyVersion(PKCS8v0, out + keyIdx, 0);
         tmpSz += sz; keyIdx += sz;
+
         /*  privateKeyAlgorithm PrivateKeyAlgorithmIdentifier */
         sz = 0; /* set sz to 0 and get privateKey oid buffer size needed */
         if (curveOID != NULL && oidSz > 0) {
@@ -2902,7 +2963,7 @@ int wc_CreatePKCS8Key(byte* out, word32* outSz, byte* key, word32 keySz,
         return tmpSz + sz;
 }
 
-#endif /* HAVE_PKCS8 && !NO_CERTS */
+#endif /* HAVE_PKCS8 */
 
 #if defined(HAVE_PKCS12) || !defined(NO_CHECK_PRIVATE_KEY)
 /* check that the private key is a pair for the public key
@@ -3149,7 +3210,6 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
     {
         ret = 0;
     }
-    (void)ks;
 
     return ret;
 }
@@ -5605,10 +5665,9 @@ int wc_OBJ_sn2nid(const char *sn)
         {WOLFSSL_ORGUNIT_NAME, NID_organizationalUnitName},
         {WOLFSSL_EMAIL_ADDR, NID_emailAddress},
         {NULL, -1}};
+
     int i;
     #ifdef HAVE_ECC
-    char curveName[16]; /* Same as MAX_CURVE_NAME_SZ but can't include that
-                         * symbol in this file */
     int eccEnum;
     #endif
     WOLFSSL_ENTER("OBJ_sn2nid");
@@ -5621,11 +5680,8 @@ int wc_OBJ_sn2nid(const char *sn)
     /* Nginx uses this OpenSSL string. */
     if (XSTRNCMP(sn, "prime256v1", 10) == 0)
         sn = "SECP256R1";
-    /* OpenSSL allows lowercase curve names */
-    for (i = 0; i < (int)(sizeof(curveName) - 1) && *sn; i++) {
-        curveName[i] = (char)XTOUPPER(*sn++);
-    }
-    curveName[i] = '\0';
+    if (XSTRNCMP(sn, "secp384r1", 10) == 0)
+        sn = "SECP384R1";
     /* find based on name and return NID */
     for (i = 0;
 #ifndef WOLFSSL_ECC_CURVE_STATIC
@@ -5634,7 +5690,7 @@ int wc_OBJ_sn2nid(const char *sn)
          ecc_sets[i].size != 0;
 #endif
          i++) {
-        if (XSTRNCMP(curveName, ecc_sets[i].name, ECC_MAXNAME) == 0) {
+        if (XSTRNCMP(sn, ecc_sets[i].name, ECC_MAXNAME) == 0) {
             eccEnum = ecc_sets[i].id;
             /* Convert enum value in ecc_curve_id to OpenSSL NID */
             return EccEnumToNID(eccEnum);
@@ -5657,9 +5713,6 @@ int CalcHashId(const byte* data, word32 len, byte* hash)
     ret = wc_ShaHash(data, len, hash);
 #else
     ret = NOT_COMPILED_IN;
-    (void)data;
-    (void)len;
-    (void)hash;
 #endif
 
     return ret;
@@ -6489,7 +6542,24 @@ int wc_ValidateDate(const byte* date, byte format, int dateType)
 #endif
     (void)tmpTime;
 
+    //@yqq
+    //@original
     ltime = XTIME(0);
+    //#original
+    //TEE_Time sys_time;
+    //TEE_Result res;
+    //DMSG("calling into validateDate!!!!!=======\n");
+    //res = TEE_GetTAPersistentTime(&sys_time);
+    //if (res != TEE_SUCCESS) {
+    //    DMSG("TEE_GetTAPersistentTime failed!\n");
+    //}
+    //else {
+    //    DMSG("TEE_GetTAPersistentTime succeed!===========");
+    //}
+    //ltime = sys_time.seconds;
+    //#yqq
+    DMSG("after generating the persistent time!!!\n");
+    DMSG("ltime: %lu\n", ltime);
 
 #ifdef WOLFSSL_BEFORE_DATE_CLOCK_SKEW
     if (dateType == BEFORE) {
@@ -6560,7 +6630,21 @@ int wc_GetTime(void* timePtr, word32 timeSize)
         return BUFFER_E;
     }
 
+    //@yqq
+    //@original
     *ltime = XTIME(0);
+    //#original
+    //TEE_Time sys_time;
+    //TEE_Result res;
+    //res = TEE_GetTAPersistentTime(&sys_time);
+    //if (res != TEE_SUCCESS) {
+    //    DMSG("TEE_GetTAPersistentTime failed!\n");
+    //}
+    //else {
+    //    DMSG("TEE_GetTAPersistentTime succeed!===========");
+    //}
+    //*ltime = sys_time.seconds;
+    //#yqq
 
     return 0;
 }
@@ -6613,14 +6697,17 @@ static int GetDate(DecodedCert* cert, int dateType, int verify, int maxIdx)
     byte   format;
     word32 startIdx = 0;
 
+    DMSG("date: %s\n", date);
     if (dateType == BEFORE)
         cert->beforeDate = &cert->source[cert->srcIdx];
     else
         cert->afterDate = &cert->source[cert->srcIdx];
     startIdx = cert->srcIdx;
 
+    DMSG("date: %s\n", date);
     ret = GetDateInfo(cert->source, &cert->srcIdx, &datePtr, &format,
                       &length, maxIdx);
+    DMSG("date: %s\n", date);
     if (ret < 0)
         return ret;
 
@@ -6635,10 +6722,14 @@ static int GetDate(DecodedCert* cert, int dateType, int verify, int maxIdx)
 #ifndef NO_ASN_TIME
     if (verify != NO_VERIFY && verify != VERIFY_SKIP_DATE &&
             !XVALIDATE_DATE(date, format, dateType)) {
-        if (dateType == BEFORE)
+        if (dateType == BEFORE) {
+            DMSG("date: %s\n", date);
             return ASN_BEFORE_DATE_E;
-        else
+        }
+        else {
+            DMSG("date: %d\n", XVALIDATE_DATE(date, format, dateType));
             return ASN_AFTER_DATE_E;
+        }
     }
 #else
     (void)verify;
@@ -6657,15 +6748,21 @@ static int GetValidity(DecodedCert* cert, int verify, int maxIdx)
 
     maxIdx = cert->srcIdx + length;
 
+    DMSG("badDate: %d\n", badDate);
     if (GetDate(cert, BEFORE, verify, maxIdx) < 0)
         badDate = ASN_BEFORE_DATE_E; /* continue parsing */
 
-    if (GetDate(cert, AFTER, verify, maxIdx) < 0)
+    DMSG("badDate: %d\n", badDate);
+    if (GetDate(cert, AFTER, verify, maxIdx) < 0) {
+        DMSG("badDate: %d\n", badDate);
         return ASN_AFTER_DATE_E;
+    }
 
+    DMSG("badDate: %d\n", badDate);
     if (badDate != 0)
         return badDate;
 
+    DMSG("badDate: %d\n", badDate);
     return 0;
 }
 
@@ -6772,19 +6869,24 @@ int wc_GetPubX509(DecodedCert* cert, int verify, int* badDate)
 int DecodeToKey(DecodedCert* cert, int verify)
 {
     int badDate = 0;
-    int ret;
+    int ret = 0;
 
-    if ( (ret = wc_GetPubX509(cert, verify, &badDate)) < 0)
+    DMSG("ret: %d\n", ret);
+    if ( (ret = wc_GetPubX509(cert, verify, &badDate)) < 0) {
+        DMSG("ret: %d\n", ret);
         return ret;
-
+    }
+        
     /* Determine if self signed */
     cert->selfSigned = XMEMCMP(cert->issuerHash,
                                cert->subjectHash,
                                KEYID_SIZE) == 0 ? 1 : 0;
 
+    DMSG("ret: %d\n", ret);
     if ( (ret = GetKey(cert)) < 0)
         return ret;
 
+    DMSG("ret: %d\n", ret);
     WOLFSSL_MSG("Got Key");
 
     if (badDate != 0)
@@ -6793,7 +6895,6 @@ int DecodeToKey(DecodedCert* cert, int verify)
     return ret;
 }
 
-#ifndef NO_CERTS
 static int GetSignature(DecodedCert* cert)
 {
     int length;
@@ -6813,7 +6914,6 @@ static int GetSignature(DecodedCert* cert)
 
     return 0;
 }
-#endif
 
 static word32 SetOctetString8Bit(word32 len, byte* output)
 {
@@ -9177,9 +9277,11 @@ int ParseCert(DecodedCert* cert, int type, int verify, void* cm)
     char* ptr;
 
     ret = ParseCertRelative(cert, type, verify, cm);
+    DMSG("ret value: %d\n", ret);
     if (ret < 0)
         return ret;
 
+    DMSG("\n");
     if (cert->subjectCNLen > 0) {
         ptr = (char*) XMALLOC(cert->subjectCNLen + 1, cert->heap,
                               DYNAMIC_TYPE_SUBJECT_CN);
@@ -9190,6 +9292,7 @@ int ParseCert(DecodedCert* cert, int type, int verify, void* cm)
         cert->subjectCN = ptr;
         cert->subjectCNStored = 1;
     }
+    DMSG("\n");
 
     if (cert->keyOID == RSAk &&
                           cert->publicKey != NULL  && cert->pubKeySize > 0) {
@@ -9202,6 +9305,7 @@ int ParseCert(DecodedCert* cert, int type, int verify, void* cm)
         cert->pubKeyStored = 1;
     }
 
+    DMSG("\n");
     return ret;
 }
 
@@ -9623,6 +9727,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
         return BAD_FUNC_ARG;
     }
 
+    DMSG("\n");
 #ifdef WOLFSSL_CERT_REQ
     if (type == CERTREQ_TYPE)
         cert->isCSR = 1;
@@ -9632,11 +9737,14 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
         cert->badDate = 0;
         cert->criticalExt = 0;
         if ((ret = DecodeToKey(cert, verify)) < 0) {
+            DMSG("ret: %d\n", ret);
             if (ret == ASN_BEFORE_DATE_E || ret == ASN_AFTER_DATE_E)
                 cert->badDate = ret;
             else
                 return ret;
         }
+
+        DMSG("ret: %d\n", ret);
 
         WOLFSSL_MSG("Parsed Past Key");
 
@@ -9738,8 +9846,10 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
 #endif
 
         if (cert->srcIdx < cert->sigIndex) {
+            DMSG("\n");
         #ifndef ALLOW_V1_EXTENSIONS
             if (cert->version < 2) {
+                DMSG("\n");
                 WOLFSSL_MSG("\tv1 and v2 certs not allowed extensions");
                 return ASN_VERSION_E;
             }
@@ -9750,12 +9860,15 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
             cert->extensionsSz  = cert->sigIndex - cert->srcIdx;
             cert->extensionsIdx = cert->srcIdx;   /* for potential later use */
 
+            DMSG("\n");
             if ((ret = DecodeCertExtensions(cert)) < 0) {
+                DMSG("\n");
                 if (ret == ASN_CRIT_EXT_E)
                     cert->criticalExt = ret;
                 else
                     return ret;
             }
+            DMSG("ret: %d\n", ret);
 
         #ifdef HAVE_OCSP
             /* trust for the lifetime of the responder's cert*/
@@ -9766,6 +9879,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
             cert->srcIdx = cert->sigIndex;
         }
 
+        DMSG("\n");
         if ((ret = GetAlgoId(cert->source, &cert->srcIdx,
 #ifdef WOLFSSL_CERT_REQ
                 !cert->isCSR ? &confirmOID : &cert->signatureOID,
@@ -9774,9 +9888,11 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
 #endif
                 oidSigType, cert->maxIdx)) < 0)
             return ret;
+        DMSG("ret: %d\n", ret);
 
         if ((ret = GetSignature(cert)) < 0)
             return ret;
+        DMSG("ret: %d\n", ret);
 
         if (confirmOID != cert->signatureOID
 #ifdef WOLFSSL_CERT_REQ
@@ -9784,6 +9900,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
 #endif
                 )
             return ASN_SIG_OID_E;
+        DMSG("ret: %d\n", ret);
 
     #ifndef NO_SKID
         if (cert->extSubjKeyIdSet == 0 && cert->publicKey != NULL &&
@@ -9793,6 +9910,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
             if (ret != 0)
                 return ret;
         }
+        DMSG("ret: %d\n", ret);
     #endif /* !NO_SKID */
 
         if (!cert->selfSigned || (verify != NO_VERIFY && type != CA_TYPE &&
@@ -9982,6 +10100,7 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
     tsip_encRsaKeyIdx = NULL;
 #endif
 
+    DMSG("ret: %d\n", ret);
     if (verify != NO_VERIFY && type != CA_TYPE && type != TRUSTED_PEER_TYPE) {
         if (cert->ca) {
             if (verify == VERIFY || verify == VERIFY_OCSP ||
@@ -10023,6 +10142,8 @@ int ParseCertRelative(DecodedCert* cert, int type, int verify, void* cm)
 exit_pcr:
 #endif
 
+    DMSG("ret: %d\n", ret);
+    DMSG("badDate: %d\n", cert->badDate);
     if (cert->badDate != 0) {
         if (verify != VERIFY_SKIP_DATE) {
             return cert->badDate;
@@ -10030,9 +10151,12 @@ exit_pcr:
         WOLFSSL_MSG("Date error: Verify option is skipping");
     }
 
+    DMSG("ret: %d\n", ret);
+    DMSG("criticalExt: %d\n", cert->criticalExt);
     if (cert->criticalExt != 0)
         return cert->criticalExt;
 
+    DMSG("ret: %d\n", ret);
     return ret;
 }
 
@@ -12413,6 +12537,16 @@ static int CopyValidity(byte* output, Cert* cert)
 
 #endif
 
+/* ASN Encoded Name field */
+typedef struct EncodedName {
+    int  nameLen;                /* actual string value length */
+    int  totalLen;               /* total encoded length */
+    int  type;                   /* type of name */
+    int  used;                   /* are we actually using this one */
+    byte encoded[CTC_NAME_SIZE * 2]; /* encoding */
+} EncodedName;
+
+
 /* Get Which Name from index */
 const char* GetOneCertName(CertName* name, int idx)
 {
@@ -12994,126 +13128,269 @@ int FlattenAltNames(byte* output, word32 outputSz, const DNS_entry* names)
  *
  * returns length on success
  */
-int wc_EncodeName(EncodedName* name, const char* nameStr, char nameType,
-                  byte type)
+static int wc_EncodeName(EncodedName* name, const char* nameStr, char nameType,
+        byte type)
 {
     word32 idx = 0;
-    /* bottom up */
-    byte firstLen[1 + MAX_LENGTH_SZ];
-    byte secondLen[MAX_LENGTH_SZ];
-    byte sequence[MAX_SEQ_SZ];
-    byte set[MAX_SET_SZ];
 
-    int strLen;
-    int thisLen;
-    int firstSz, secondSz, seqSz, setSz;
+    if (nameStr) {
+        /* bottom up */
+        byte firstLen[1 + MAX_LENGTH_SZ];
+        byte secondLen[MAX_LENGTH_SZ];
+        byte sequence[MAX_SEQ_SZ];
+        byte set[MAX_SET_SZ];
 
-    if (nameStr == NULL) {
-        name->used = 0;
-        return 0;
-    }
-    thisLen = strLen = (int)XSTRLEN(nameStr);
-    if (strLen == 0) { /* no user data for this item */
-        name->used = 0;
-        return 0;
-    }
+        int strLen  = (int)XSTRLEN(nameStr);
+        int thisLen = strLen;
+        int firstSz, secondSz, seqSz, setSz;
 
-    /* Restrict country code size */
-    if (ASN_COUNTRY_NAME == type && strLen != CTC_COUNTRY_SIZE) {
-        WOLFSSL_MSG("Country code size error");
-        return ASN_COUNTRY_SIZE_E;
-    }
-
-    secondSz = SetLength(strLen, secondLen);
-    thisLen += secondSz;
-    switch (type) {
-        case ASN_EMAIL_NAME: /* email */
-            thisLen += EMAIL_JOINT_LEN;
-            firstSz  = EMAIL_JOINT_LEN;
-            break;
-
-        case ASN_DOMAIN_COMPONENT:
-            thisLen += PILOT_JOINT_LEN;
-            firstSz  = PILOT_JOINT_LEN;
-            break;
-
-        default:
-            thisLen++;                                 /* str type */
-            thisLen += JOINT_LEN;
-            firstSz  = JOINT_LEN + 1;
-    }
-    thisLen++; /* id  type */
-    firstSz  = SetObjectId(firstSz, firstLen);
-    thisLen += firstSz;
-
-    seqSz = SetSequence(thisLen, sequence);
-    thisLen += seqSz;
-    setSz = SetSet(thisLen, set);
-    thisLen += setSz;
-
-    if (thisLen > (int)sizeof(name->encoded)) {
-        return BUFFER_E;
-    }
-
-    /* store it */
-    idx = 0;
-    /* set */
-    XMEMCPY(name->encoded, set, setSz);
-    idx += setSz;
-    /* seq */
-    XMEMCPY(name->encoded + idx, sequence, seqSz);
-    idx += seqSz;
-    /* asn object id */
-    XMEMCPY(name->encoded + idx, firstLen, firstSz);
-    idx += firstSz;
-    switch (type) {
-        case ASN_EMAIL_NAME:
-        {
-            const byte EMAIL_OID[] = {
-                0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01, 0x16
-            };
-            /* email joint id */
-            XMEMCPY(name->encoded + idx, EMAIL_OID, sizeof(EMAIL_OID));
-            idx += (int)sizeof(EMAIL_OID);
-            break;
+        if (strLen == 0) { /* no user data for this item */
+            name->used = 0;
+            return 0;
         }
 
-        case ASN_DOMAIN_COMPONENT:
-        {
-            const byte PILOT_OID[] = {
-                0x09, 0x92, 0x26, 0x89, 0x93, 0xF2, 0x2C, 0x64, 0x01
-            };
-
-            XMEMCPY(name->encoded + idx, PILOT_OID, sizeof(PILOT_OID));
-            idx += (int)sizeof(PILOT_OID);
-            /* id type */
-            name->encoded[idx++] = type;
-            /* str type */
-            name->encoded[idx++] = nameType;
-            break;
+        /* Restrict country code size */
+        if (ASN_COUNTRY_NAME == type && strLen != CTC_COUNTRY_SIZE) {
+            WOLFSSL_MSG("Country code size error");
+            return ASN_COUNTRY_SIZE_E;
         }
 
-        default:
-            name->encoded[idx++] = 0x55;
-            name->encoded[idx++] = 0x04;
-            /* id type */
-            name->encoded[idx++] = type;
-            /* str type */
-            name->encoded[idx++] = nameType;
-    }
-    /* second length */
-    XMEMCPY(name->encoded + idx, secondLen, secondSz);
-    idx += secondSz;
-    /* str value */
-    XMEMCPY(name->encoded + idx, nameStr, strLen);
-    idx += strLen;
+        secondSz = SetLength(strLen, secondLen);
+        thisLen += secondSz;
+        switch (type) {
+            case ASN_EMAIL_NAME: /* email */
+                thisLen += EMAIL_JOINT_LEN;
+                firstSz  = EMAIL_JOINT_LEN;
+                break;
 
-    name->type = type;
-    name->totalLen = idx;
-    name->used = 1;
+            case ASN_DOMAIN_COMPONENT:
+                thisLen += PILOT_JOINT_LEN;
+                firstSz  = PILOT_JOINT_LEN;
+                break;
+
+            default:
+                thisLen++;                                 /* str type */
+                thisLen += JOINT_LEN;
+                firstSz  = JOINT_LEN + 1;
+        }
+        thisLen++; /* id  type */
+        firstSz  = SetObjectId(firstSz, firstLen);
+        thisLen += firstSz;
+
+        seqSz = SetSequence(thisLen, sequence);
+        thisLen += seqSz;
+        setSz = SetSet(thisLen, set);
+        thisLen += setSz;
+
+        if (thisLen > (int)sizeof(name->encoded)) {
+            return BUFFER_E;
+        }
+
+        /* store it */
+        idx = 0;
+        /* set */
+        XMEMCPY(name->encoded, set, setSz);
+        idx += setSz;
+        /* seq */
+        XMEMCPY(name->encoded + idx, sequence, seqSz);
+        idx += seqSz;
+        /* asn object id */
+        XMEMCPY(name->encoded + idx, firstLen, firstSz);
+        idx += firstSz;
+        switch (type) {
+            case ASN_EMAIL_NAME:
+                {
+                    const byte EMAIL_OID[] = { 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d,
+                                       0x01, 0x09, 0x01, 0x16 };
+                    /* email joint id */
+                    XMEMCPY(name->encoded + idx, EMAIL_OID, sizeof(EMAIL_OID));
+                    idx += (int)sizeof(EMAIL_OID);
+                }
+                break;
+
+            case ASN_DOMAIN_COMPONENT:
+                {
+                    const byte PILOT_OID[] = { 0x09, 0x92, 0x26, 0x89,
+                                    0x93, 0xF2, 0x2C, 0x64, 0x01
+                    };
+
+                    XMEMCPY(name->encoded + idx, PILOT_OID,
+                                                     sizeof(PILOT_OID));
+                    idx += (int)sizeof(PILOT_OID);
+                    /* id type */
+                    name->encoded[idx++] = type;
+                    /* str type */
+                    name->encoded[idx++] = nameType;
+                }
+                break;
+
+            default:
+                name->encoded[idx++] = 0x55;
+                name->encoded[idx++] = 0x04;
+                /* id type */
+                name->encoded[idx++] = type;
+                /* str type */
+                name->encoded[idx++] = nameType;
+        }
+        /* second length */
+        XMEMCPY(name->encoded + idx, secondLen, secondSz);
+        idx += secondSz;
+        /* str value */
+        XMEMCPY(name->encoded + idx, nameStr, strLen);
+        idx += strLen;
+
+        name->type = type;
+        name->totalLen = idx;
+        name->used = 1;
+    }
+    else
+        name->used = 0;
 
     return idx;
 }
+
+
+#if defined(OPENSSL_EXTRA) || defined(WOLFSSL_WPAS_SMALL)
+/* Converts from NID_* value to wolfSSL value if needed */
+static int ConvertNIDToWolfSSL(int nid)
+{
+    switch (nid) {
+        case NID_commonName : return ASN_COMMON_NAME;
+        case NID_surname :    return ASN_SUR_NAME;
+        case NID_countryName: return ASN_COUNTRY_NAME;
+        case NID_localityName: return ASN_LOCALITY_NAME;
+        case NID_stateOrProvinceName: return ASN_STATE_NAME;
+        case NID_organizationName: return ASN_ORG_NAME;
+        case NID_organizationalUnitName: return ASN_ORGUNIT_NAME;
+        case NID_emailAddress: return ASN_EMAIL_NAME;
+        case NID_serialNumber: return ASN_SERIAL_NUMBER;
+        case NID_businessCategory: return ASN_BUS_CAT;
+        case NID_domainComponent: return ASN_DOMAIN_COMPONENT;
+        default:
+            WOLFSSL_MSG("Attribute NID not found");
+            return -1;
+    }
+}
+
+
+/* Converts the x509 name structure into DER format.
+ *
+ * out  pointer to either a pre setup buffer or a pointer to null for
+ *      creating a dynamic buffer. In the case that a pre-existing buffer is
+ *      used out will be incremented the size of the DER buffer on success.
+ *
+ * returns the size of the buffer on success, or negative value with failure
+ */
+int wolfSSL_i2d_X509_NAME(WOLFSSL_X509_NAME* name, unsigned char** out)
+{
+    int  totalBytes = 0, i, idx;
+    byte temp[MAX_SEQ_SZ];
+    byte *output, *local = NULL;
+#ifdef WOLFSSL_SMALL_STACK
+    EncodedName* names = NULL;
+#else
+    EncodedName  names[MAX_NAME_ENTRIES];
+#endif
+
+    if (out == NULL || name == NULL)
+        return BAD_FUNC_ARG;
+
+#ifdef WOLFSSL_SMALL_STACK
+    names = (EncodedName*)XMALLOC(sizeof(EncodedName) * MAX_NAME_ENTRIES, NULL,
+                                                       DYNAMIC_TYPE_TMP_BUFFER);
+    if (names == NULL)
+        return MEMORY_E;
+#endif
+
+    XMEMSET(names, 0, sizeof(EncodedName) * MAX_NAME_ENTRIES);
+
+    for (i = 0; i < MAX_NAME_ENTRIES; i++) {
+        WOLFSSL_X509_NAME_ENTRY* entry;
+        int ret;
+
+        entry = wolfSSL_X509_NAME_get_entry(name, i);
+        if (entry != NULL && entry->set == 1) {
+            const char* nameStr;
+            int type;
+            WOLFSSL_ASN1_STRING* data;
+
+            data = wolfSSL_X509_NAME_ENTRY_get_data(entry);
+            if (data == NULL) {
+            #ifdef WOLFSSL_SMALL_STACK
+                XFREE(names, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            #endif
+                WOLFSSL_MSG("Error getting entry data");
+                return WOLFSSL_FATAL_ERROR;
+            }
+
+            nameStr = (const char*)wolfSSL_ASN1_STRING_data(data);
+            type    = wolfSSL_ASN1_STRING_type(data);
+
+            switch (type) {
+                case MBSTRING_UTF8:
+                    type = CTC_UTF8;
+                    break;
+                case V_ASN1_PRINTABLESTRING:
+                    type = CTC_PRINTABLE;
+                    break;
+                default:
+                    WOLFSSL_MSG("Unknown encoding type conversion UTF8 by default");
+                    type = CTC_UTF8;
+            }
+            ret = wc_EncodeName(&names[i], nameStr, type,
+                ConvertNIDToWolfSSL(entry->nid));
+            if (ret < 0) {
+            #ifdef WOLFSSL_SMALL_STACK
+                XFREE(names, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+            #endif
+                WOLFSSL_MSG("EncodeName failed");
+                return WOLFSSL_FATAL_ERROR;
+            }
+            totalBytes += ret;
+        }
+    }
+
+    /* header */
+    idx = SetSequence(totalBytes, temp);
+    if (totalBytes + idx > ASN_NAME_MAX) {
+#ifdef WOLFSSL_SMALL_STACK
+        XFREE(names, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+        WOLFSSL_MSG("Total Bytes is greater than ASN_NAME_MAX");
+        return BUFFER_E;
+    }
+
+    /* check if using buffer passed in */
+    if (*out == NULL) {
+        *out = local = (unsigned char*)XMALLOC(totalBytes + idx, NULL,
+                DYNAMIC_TYPE_OPENSSL);
+        if (*out == NULL) {
+            return MEMORY_E;
+        }
+    }
+    output = *out;
+
+    idx = SetSequence(totalBytes, output);
+    totalBytes += idx;
+    for (i = 0; i < MAX_NAME_ENTRIES; i++) {
+        if (names[i].used) {
+            XMEMCPY(output + idx, names[i].encoded, names[i].totalLen);
+            idx += names[i].totalLen;
+        }
+    }
+
+#ifdef WOLFSSL_SMALL_STACK
+    XFREE(names, NULL, DYNAMIC_TYPE_TMP_BUFFER);
+#endif
+
+    /* used existing buffer passed in, so increment pointer */
+    if (local == NULL) {
+        *out += totalBytes;
+    }
+    return totalBytes;
+}
+#endif /* OPENSSL_EXTRA || WOLFSSL_WPAS_SMALL */
+
 
 /* encode CertName into output, return total bytes written */
 int SetName(byte* output, word32 outputSz, CertName* name)
@@ -13277,7 +13554,21 @@ static int SetValidity(byte* output, int daysValid)
 #endif
     (void)tmpTime;
 
+    //@yqq
+    //@original
     now = XTIME(0);
+    //#original
+    //TEE_Time sys_time;
+    //TEE_Result res;
+    //res = TEE_GetTAPersistentTime(&sys_time);
+    //if (res != TEE_SUCCESS) {
+    //    DMSG("TEE_GetTAPersistentTime failed!\n");
+    //}
+    //else {
+    //    DMSG("TEE_GetTAPersistentTime succeeded!=======\n");
+    //}
+    //now = sys_time.seconds;
+    //#yqq
 
     /* before now */
     before[0] = ASN_GENERALIZED_TIME;
@@ -18346,291 +18637,6 @@ int wc_ParseCertPIV(wc_CertPIV* piv, const byte* buf, word32 totalSz)
 }
 
 #endif /* WOLFSSL_CERT_PIV */
-
-
-
-#ifdef HAVE_SMIME
-
-/*****************************************************************************
-* wc_MIME_parse_headers - Reads the char array in and parses out MIME headers
-* and parameters into headers.  Will continue until in has no more content.
-*
-* RETURNS:
-* returns zero on success, non-zero on error.
-*/
-int wc_MIME_parse_headers(char* in, int inLen, MimeHdr** headers)
-{
-    MimeHdr* nextHdr = NULL;
-    MimeHdr* curHdr = NULL;
-    MimeParam* nextParam = NULL;
-    size_t start = 0;
-    size_t end = 0;
-    char* nameAttr = NULL;
-    char* bodyVal = NULL;
-    MimeTypes mimeType = MIME_HDR;
-    MimeStatus mimeStatus = MIME_NAMEATTR;
-    int ret = -1;
-    size_t pos = 0;
-    size_t lineLen = 0;
-    char* curLine = NULL;
-    char* ptr = NULL;
-
-    if (in == NULL || inLen <= 0 || in[inLen] != '\0' || headers == NULL) {
-        ret = BAD_FUNC_ARG;
-        goto error;
-    }
-    nextHdr = (MimeHdr*)XMALLOC(sizeof(MimeHdr), NULL, DYNAMIC_TYPE_PKCS7);
-    nextParam = (MimeParam*)XMALLOC(sizeof(MimeParam), NULL,
-                                    DYNAMIC_TYPE_PKCS7);
-    if (nextHdr == NULL || nextParam == NULL) {
-        ret = MEMORY_E;
-        goto error;
-    }
-    XMEMSET(nextHdr, 0, (word32)sizeof(MimeHdr));
-    XMEMSET(nextParam, 0, (word32)sizeof(MimeParam));
-
-    curLine = XSTRTOK(in, "\r\n", &ptr);
-    if (curLine == NULL) {
-        ret = ASN_PARSE_E;
-        goto error;
-    }
-
-    while (curLine != NULL) {
-        /* Leftover from previous line, add params to previous header. */
-        if (curLine[0] == ' ' && curHdr) {
-            mimeType = MIME_PARAM;
-        }
-        else {
-            mimeType = MIME_HDR;
-        }
-        start = end = 0;
-        lineLen = XSTRLEN(curLine);
-
-        for (pos = 0; pos < lineLen; pos++) {
-            char cur = curLine[pos];
-
-            if (mimeStatus == MIME_NAMEATTR && ((cur == ':' &&
-                mimeType == MIME_HDR) || (cur == '=' &&
-                mimeType == MIME_PARAM))) {
-                mimeStatus = MIME_BODYVAL;
-                end = pos-1;
-                ret = wc_MIME_header_strip(curLine, &nameAttr, start, end);
-                if (ret) {
-                    goto error;
-                }
-                start = pos+1;
-            }
-            else if (mimeStatus == MIME_BODYVAL && cur == ';') {
-                end = pos-1;
-                ret = wc_MIME_header_strip(curLine, &bodyVal, start, end);
-                if (ret) {
-                    goto error;
-                }
-                if (mimeType == MIME_HDR) {
-                    nextHdr->name = nameAttr;
-                    nextHdr->body = bodyVal;
-                    nextHdr->next = curHdr;
-                    curHdr = nextHdr;
-                    nextHdr = (MimeHdr*)XMALLOC(sizeof(MimeHdr), NULL,
-                                                DYNAMIC_TYPE_PKCS7);
-                    if (nextHdr == NULL) {
-                        ret = MEMORY_E;
-                        goto error;
-                    }
-                    XMEMSET(nextHdr, 0, (word32)sizeof(MimeHdr));
-                }
-                else {
-                    nextParam->attribute = nameAttr;
-                    nextParam->value = bodyVal;
-                    nextParam->next = curHdr->params;
-                    curHdr->params = nextParam;
-                    nextParam = (MimeParam*)XMALLOC(sizeof(MimeParam), NULL,
-                                                    DYNAMIC_TYPE_PKCS7);
-                    if (nextParam == NULL) {
-                        ret = MEMORY_E;
-                        goto error;
-                    }
-                    XMEMSET(nextParam, 0, (word32)sizeof(MimeParam));
-                }
-                mimeType = MIME_PARAM;
-                mimeStatus = MIME_NAMEATTR;
-                start = pos+1;
-            }
-        }
-
-        end = lineLen-1;
-        /* Omit newline characters. */
-        while ((curLine[end] == '\r' || curLine[end] == '\n') && end > 0) {
-            end--;
-        }
-        if (end >= start && mimeStatus == MIME_BODYVAL) {
-            ret = wc_MIME_header_strip(curLine, &bodyVal, start, end);
-            if (ret) {
-                goto error;
-            }
-            if (mimeType == MIME_HDR) {
-                nextHdr->name = nameAttr;
-                nextHdr->body = bodyVal;
-                nextHdr->next = curHdr;
-                curHdr = nextHdr;
-                nextHdr = (MimeHdr*)XMALLOC(sizeof(MimeHdr), NULL,
-                                            DYNAMIC_TYPE_PKCS7);
-                if (nextHdr == NULL) {
-                    ret = MEMORY_E;
-                    goto error;
-                }
-                XMEMSET(nextHdr, 0, (word32)sizeof(MimeHdr));
-            } else {
-                nextParam->attribute = nameAttr;
-                nextParam->value = bodyVal;
-                nextParam->next = curHdr->params;
-                curHdr->params = nextParam;
-                nextParam = (MimeParam*)XMALLOC(sizeof(MimeParam), NULL,
-                                                DYNAMIC_TYPE_PKCS7);
-                if (nextParam == NULL) {
-                    ret = MEMORY_E;
-                    goto error;
-                }
-                XMEMSET(nextParam, 0, (word32)sizeof(MimeParam));
-            }
-        }
-
-        curLine = XSTRTOK(NULL, "\r\n", &ptr);
-        mimeStatus = MIME_NAMEATTR;
-    }
-
-    *headers = curHdr;
-    XFREE(nextHdr, NULL, DYNAMIC_TYPE_PKCS7);
-    XFREE(nextParam, NULL, DYNAMIC_TYPE_PKCS7);
-
-    return 0;
-
-error:
-    wc_MIME_free_hdrs(curHdr);
-    wc_MIME_free_hdrs(nextHdr);
-    XFREE(nameAttr, NULL, DYNAMIC_TYPE_PKCS7);
-    XFREE(bodyVal, NULL, DYNAMIC_TYPE_PKCS7);
-    XFREE(nextParam, NULL, DYNAMIC_TYPE_PKCS7);
-
-    return ret;
-}
-
-/*****************************************************************************
-* wc_MIME_header_strip - Reads the string in from indices start to end, strips
-* out disallowed/separator characters and places the rest into *out.
-*
-* RETURNS:
-* returns zero on success, non-zero on error.
-*/
-int wc_MIME_header_strip(char* in, char** out, size_t start, size_t end)
-{
-    size_t inPos = start;
-    size_t outPos = 0;
-    size_t inLen = 0;
-
-    if (end < start || in == NULL || out == NULL) {
-        return BAD_FUNC_ARG;
-    }
-
-    inLen = XSTRLEN(in);
-    if (start > inLen || end > inLen) {
-        return BAD_FUNC_ARG;
-    }
-
-    *out = (char*)XMALLOC(((end-start)+2)*sizeof(char), NULL,
-                          DYNAMIC_TYPE_PKCS7);
-    if (*out == NULL) {
-        return MEMORY_E;
-    }
-
-    while (inPos <= end) {
-        if (in[inPos] >= MIME_HEADER_ASCII_MIN && in[inPos] <=
-            MIME_HEADER_ASCII_MAX && in[inPos] != ';' && in[inPos] != '\"') {
-            (*out)[outPos] = in[inPos];
-            outPos++;
-        }
-        inPos++;
-    }
-    (*out)[outPos] = '\0';
-
-    return 0;
-}
-
-/*****************************************************************************
-* wc_MIME_find_header_name - Searches through all given headers until a header with
-* a name matching the provided name is found.
-*
-* RETURNS:
-* returns a pointer to the found header, if no match was found, returns NULL.
-*/
-MimeHdr* wc_MIME_find_header_name(const char* name, MimeHdr* header)
-{
-    size_t len = XSTRLEN(name);
-
-    while (header) {
-        if (!XSTRNCMP(name, header->name, len)) {
-            return header;
-        }
-        header = header->next;
-    }
-
-    return header;
-}
-
-/*****************************************************************************
-* wc_MIME_find_param_attr - Searches through all parameters until a parameter
-* with a attribute matching the provided attribute is found.
-*
-* RETURNS:
-* returns a pointer to the found parameter, if no match was found,
-* returns NULL.
-*/
-MimeParam* wc_MIME_find_param_attr(const char* attribute,
-                                    MimeParam* param)
-{
-    size_t len = XSTRLEN(attribute);
-
-    while (param) {
-        if (!XSTRNCMP(attribute, param->attribute, len)) {
-            return param;
-        }
-        param = param->next;
-    }
-
-    return param;
-}
-
-/*****************************************************************************
-* wc_MIME_free_hdrs - Frees all MIME headers, parameters and strings starting from
-* the provided header pointer.
-*
-* RETURNS:
-* returns zero on success, non-zero on error.
-*/
-int wc_MIME_free_hdrs(MimeHdr* head)
-{
-    MimeHdr* curHdr = NULL;
-    MimeParam* curParam = NULL;
-
-    while (head) {
-        while (head->params) {
-            curParam = head->params;
-            head->params = head->params->next;
-            XFREE(curParam->attribute, NULL, DYNAMIC_TYPE_PKCS7);
-            XFREE(curParam->value, NULL, DYNAMIC_TYPE_PKCS7);
-            XFREE(curParam, NULL, DYNAMIC_TYPE_PKCS7);
-        }
-        curHdr = head;
-        head = head->next;
-        XFREE(curHdr->name, NULL, DYNAMIC_TYPE_PKCS7);
-        XFREE(curHdr->body, NULL, DYNAMIC_TYPE_PKCS7);
-        XFREE(curHdr, NULL, DYNAMIC_TYPE_PKCS7);
-    }
-
-    return 0;
-}
-
-#endif /* HAVE_SMIME */
 
 
 #undef ERROR_OUT

@@ -34,6 +34,10 @@
     #define WOLFSSL_MALLOC_CHECK
 #endif
 
+//@yqq
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
+//#yqq
 
 /*
 Possible memory options:
@@ -126,6 +130,9 @@ void* wolfSSL_Malloc(size_t size, const char* func, unsigned int line)
 void* wolfSSL_Malloc(size_t size)
 #endif
 {
+    //@yqq
+    DMSG("calling into wolfssl_malloc?\n");
+    //#yqq
     void* res = 0;
 
     if (malloc_function) {

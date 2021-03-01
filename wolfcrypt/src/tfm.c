@@ -31,6 +31,9 @@
  *  to fit wolfSSL's needs.
  */
 
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
+
 #ifdef HAVE_CONFIG_H
     #include <config.h>
 #endif
@@ -1944,23 +1947,11 @@ static int _fp_exptmod_ct(fp_int * G, fp_int * X, int digits, fp_int * P,
   /* now set R[0][1] to G * R mod m */
   if (fp_cmp_mag(P, G) != FP_GT) {
      /* G > P so we reduce it first */
-     err = fp_mod(G, P, &R[1]);
-     if (err != FP_OKAY) {
-#ifdef WOLFSSL_SMALL_STACK
-         XFREE(R, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-         return err;
-     }
+     fp_mod(G, P, &R[1]);
   } else {
      fp_copy(G, &R[1]);
   }
-  err = fp_mulmod (&R[1], &R[0], P, &R[1]);
-  if (err != FP_OKAY) {
-#ifdef WOLFSSL_SMALL_STACK
-      XFREE(R, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
-      return err;
-  }
+  fp_mulmod (&R[1], &R[0], P, &R[1]);
 
   /* for j = t-1 downto 0 do
         r_!k = R0*R1; r_k = r_k^2
@@ -5210,12 +5201,6 @@ int fp_lcm(fp_int *a, fp_int *b, fp_int *c)
    fp_int  *t;
 #endif
 
-   /* LCM of 0 and any number is undefined as 0 is not in the set of values
-    * being used. */
-   if (fp_iszero(a) == FP_YES || fp_iszero(b) == FP_YES) {
-       return FP_VAL;
-   }
-
 #ifdef WOLFSSL_SMALL_STACK
    t = (fp_int*)XMALLOC(sizeof(fp_int) * 2, NULL, DYNAMIC_TYPE_BIGINT);
    if (t == NULL) {
@@ -5254,11 +5239,6 @@ int fp_gcd(fp_int *a, fp_int *b, fp_int *c)
 #else
    fp_int *u, *v, *r;
 #endif
-
-   /* GCD of 0 and 0 is undefined as all integers divide 0. */
-   if (fp_iszero(a) == FP_YES && fp_iszero(b) == FP_YES) {
-       return FP_VAL;
-   }
 
    /* either zero than gcd is the largest */
    if (fp_iszero (a) == FP_YES && fp_iszero (b) == FP_NO) {
@@ -5302,9 +5282,6 @@ int fp_gcd(fp_int *a, fp_int *b, fp_int *c)
    while (fp_iszero(v) == FP_NO) {
       int err = fp_mod(u, v, r);
       if (err != MP_OKAY) {
-#ifdef WOLFSSL_SMALL_STACK
-          XFREE(u, NULL, DYNAMIC_TYPE_BIGINT);
-#endif
         return err;
       }
       fp_copy(v, u);
@@ -5495,6 +5472,9 @@ static int fp_read_radix(fp_int *a, const char *str, int radix)
 /* fast math conversion */
 int mp_read_radix(mp_int *a, const char *str, int radix)
 {
+    //@yqq
+    DMSG("mp_read_radix in tfm.c\n");
+    //#yqq
     return fp_read_radix(a, str, radix);
 }
 

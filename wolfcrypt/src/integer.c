@@ -27,6 +27,11 @@
  */
 
 
+//@yqq
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
+//#yqq
+
 #ifdef HAVE_CONFIG_H
     #include <config.h>
 #endif
@@ -4302,8 +4307,6 @@ int mp_add_d (mp_int* a, mp_digit b, mp_int* c)
   int     res, ix, oldused;
   mp_digit *tmpa, *tmpc, mu;
 
-  if (b > MP_DIGIT_MAX) return MP_VAL;
-
   /* grow c as required */
   if (c->alloc < a->used + 1) {
      if ((res = mp_grow(c, a->used + 1)) != MP_OKAY) {
@@ -5041,11 +5044,6 @@ int mp_lcm (mp_int * a, mp_int * b, mp_int * c)
   int     res;
   mp_int  t1, t2;
 
-  /* LCM of 0 and any number is undefined as 0 is not in the set of values
-   * being used. */
-  if (mp_iszero (a) == MP_YES || mp_iszero (b) == MP_YES) {
-    return MP_VAL;
-  }
 
   if ((res = mp_init_multi (&t1, &t2, NULL, NULL, NULL, NULL)) != MP_OKAY) {
     return res;
@@ -5090,10 +5088,6 @@ int mp_gcd (mp_int * a, mp_int * b, mp_int * c)
 
     /* either zero than gcd is the largest */
     if (mp_iszero (a) == MP_YES) {
-        /* GCD of 0 and 0 is undefined as all integers divide 0. */
-        if (mp_iszero (b) == MP_YES) {
-           return MP_VAL;
-        }
         return mp_abs (b, c);
     }
     if (mp_iszero (b) == MP_YES) {
@@ -5183,17 +5177,53 @@ const char *mp_s_rmap = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 #endif
 
 #if !defined(NO_DSA) || defined(HAVE_ECC)
+
+/*
+char toupper(char c) {
+    //@yqq
+    //DMSG("inside to upper\n");
+    //DMSG("current char: %c\n", c);
+    //#yqq
+    char ret = '\0';
+    if (c >=97 && c <= 122) {
+        ret = c - 32;
+    }
+    else if ((c >= 65 && c <= 90)
+            || (c >= 48 && c <= 57)) {
+         ret = c;
+    }
+
+    else 
+        ret = '\0';
+
+    //@yqq
+    //DMSG("converted char: %c\n", ret);
+    //#yqq
+
+    return ret;
+}
+*/
 /* read a string [ASCII] in a given radix */
 int mp_read_radix (mp_int * a, const char *str, int radix)
 {
   int     y, res, neg;
   char    ch;
 
+  //@yqq
+  DMSG("mp_read_radix in integer.c\n");
+  //DMSG("mp_int* a: %s\n", a);
+  DMSG("char* str: %s\n", str);
+  DMSG("radix: %d\n", radix);
+  //#yqq
+
   /* zero the digit bignum */
   mp_zero(a);
 
   /* make sure the radix is ok */
   if (radix < MP_RADIX_BIN || radix > MP_RADIX_MAX) {
+      //@yqq
+      DMSG("the radix is not ok\n");
+      //#yqq
     return MP_VAL;
   }
 
@@ -5217,8 +5247,14 @@ int mp_read_radix (mp_int * a, const char *str, int radix)
      * [e.g. in hex]
      */
     ch = (radix <= 36) ? (char)XTOUPPER((unsigned char)*str) : *str;
+    //@yqq
+    //DMSG(">%c", ch);
+    //#yqq
     for (y = 0; y < 64; y++) {
       if (ch == mp_s_rmap[y]) {
+          //@yqq
+          //DMSG("break here\n");
+          //#yqq
          break;
       }
     }
@@ -5229,12 +5265,21 @@ int mp_read_radix (mp_int * a, const char *str, int radix)
      */
     if (y < radix) {
       if ((res = mp_mul_d (a, (mp_digit) radix, a)) != MP_OKAY) {
+          //@yqq
+          DMSG("res: %d\n", res);
+          //#yqq
          return res;
       }
       if ((res = mp_add_d (a, (mp_digit) y, a)) != MP_OKAY) {
+          //@yqq
+          DMSG("res: %d\n", res);
+          //#yqq
          return res;
       }
     } else {
+        //@yqq
+        DMSG("break here\n");
+        //#yqq
       break;
     }
     ++str;
@@ -5243,6 +5288,9 @@ int mp_read_radix (mp_int * a, const char *str, int radix)
   /* if digit in isn't null term, then invalid character was found */
   if (*str != '\0') {
      mp_zero (a);
+     //@yqq
+     DMSG("digit in isn't null term, invalid character was found\n");
+     //#yqq
      return MP_VAL;
   }
 
@@ -5250,6 +5298,10 @@ int mp_read_radix (mp_int * a, const char *str, int radix)
   if (mp_iszero(a) != MP_YES) {
      a->sign = neg;
   }
+
+  //@yqq
+  DMSG("returning okey\n");
+  //#yqq
   return MP_OKAY;
 }
 #endif /* !defined(NO_DSA) || defined(HAVE_ECC) */

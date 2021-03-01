@@ -49,6 +49,10 @@ This library contains implementation for the random number generator.
     #endif
 #endif
 
+//@yqq
+#include <tee_internal_api.h>
+#include <tee_internal_api_extensions.h>
+//#yqq
 
 #include <wolfssl/wolfcrypt/random.h>
 #include <wolfssl/wolfcrypt/cpuid.h>
@@ -67,6 +71,7 @@ int wc_InitRng_ex(WC_RNG* rng, void* heap, int devId)
 {
     (void)heap;
     (void)devId;
+    DMSG("\n");
     return InitRng_fips(rng);
 }
 
@@ -727,10 +732,18 @@ static int _InitRng(WC_RNG* rng, byte* nonce, word32 nonceSz,
     (void)nonce;
     (void)nonceSz;
 
-    if (rng == NULL)
+    if (rng == NULL) {
+        //@yqq
+        DMSG("rng == NULL\n");
+        //#yqq
         return BAD_FUNC_ARG;
-    if (nonce == NULL && nonceSz != 0)
+    }
+    if (nonce == NULL && nonceSz != 0) {
+        //@yqq
+        DMSG("nounce == NULL\n");
+        //#yqq
         return BAD_FUNC_ARG;
+    }
 
 #ifdef WOLFSSL_HEAP_TEST
     rng->heap = (void*)WOLFSSL_HEAP_TEST;
@@ -762,14 +775,22 @@ static int _InitRng(WC_RNG* rng, byte* nonce, word32 nonceSz,
 #ifdef WOLFSSL_ASYNC_CRYPT
     ret = wolfAsync_DevCtxInit(&rng->asyncDev, WOLFSSL_ASYNC_MARKER_RNG,
                                                         rng->heap, rng->devId);
-    if (ret != 0)
+    if (ret != 0) {
+        //@yqq
+        DMSG("ret != 0\n");
+        //#yqq
         return ret;
+    }
 #endif
 
 #ifdef HAVE_INTEL_RDRAND
     /* if CPU supports RDRAND, use it directly and by-pass DRBG init */
-    if (IS_INTEL_RDRAND(intel_flags))
+    if (IS_INTEL_RDRAND(intel_flags)) {
+        //@yqq
+        DMSG("!\n");
+        //#yqq
         return 0;
+    }
 #endif
 
 #ifdef CUSTOM_RAND_GENERATE_BLOCK
@@ -793,6 +814,9 @@ static int _InitRng(WC_RNG* rng, byte* nonce, word32 nonceSz,
                 (struct DRBG*)XMALLOC(sizeof(DRBG_internal), rng->heap,
                                                           DYNAMIC_TYPE_RNG);
         if (rng->drbg == NULL) {
+            //@yqq
+            DMSG("memory error\n");
+            //#yqq
             ret = MEMORY_E;
             rng->status = DRBG_FAILED;
         }
@@ -891,6 +915,7 @@ int wc_InitRng(WC_RNG* rng)
 
 int wc_InitRng_ex(WC_RNG* rng, void* heap, int devId)
 {
+    DMSG("\n");
     return _InitRng(rng, NULL, 0, heap, devId);
 }
 
@@ -2555,14 +2580,22 @@ int wc_GenerateSeed(OS_Seed* os, byte* output, word32 sz)
 
 #elif defined(NO_DEV_RANDOM)
 
-    #error "you need to write an os specific wc_GenerateSeed() here"
+    //#error "you need to write an os specific wc_GenerateSeed() here"
 
-    /*
+    //@wenshei
+    #include <tee_internal_api.h>
     int wc_GenerateSeed(OS_Seed* os, byte* output, word32 sz)
     {
+        //@yqq
+        DMSG("generate seed in tee\n");
+        (void)os;
+        TEE_GenerateRandom(output, sz);
+        DMSG("generated seeds\n");
+        DMSG("output: %s\n", output);
+        //#yqq
+
         return 0;
     }
-    */
 
 #else
 
