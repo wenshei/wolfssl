@@ -167,7 +167,12 @@ WOLFSSL_API void wolfSSL_Debugging_OFF(void);
     #define WOLFSSL_STUB(m)
     #define WOLFSSL_IS_DEBUG_ON() 0
 
-    #define WOLFSSL_MSG(m)
+    //@yqq
+    //@original
+    #define WOLFSSL_MSG(m) 
+    //#original
+    //#define WOLFSSL_MSG(m) DMSG(m)
+    //#yqq
     #define WOLFSSL_BUFFER(b, l)
 
 #endif /* DEBUG_WOLFSSL && !WOLFSSL_DEBUG_ERRORS_ONLY */

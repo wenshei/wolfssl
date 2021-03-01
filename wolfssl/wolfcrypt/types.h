@@ -64,7 +64,7 @@ decouple library dependencies with standard string, memory and so on.
     #ifndef WOLFSSL_TYPES
         #ifndef byte
             typedef unsigned char  byte;
-            typedef   signed char  sword8;
+            typedef          char  sword8;
             typedef unsigned char  word8;
         #endif
         #ifdef WC_16BIT_CPU
@@ -266,11 +266,16 @@ decouple library dependencies with standard string, memory and so on.
     #if defined(__GNUC__)
         #if ((__GNUC__ > 7) || ((__GNUC__ == 7) && (__GNUC_MINOR__ >= 1)))
             #undef  FALL_THROUGH
+            #define FALL_THROUGH fallthrough
+            //@wenshei 
+            /* commented out, fallthrough already defined in optee_os/lib/libutils/ext/include/compiler.h
             #if defined(WOLFSSL_LINUXKM) && defined(fallthrough)
                 #define FALL_THROUGH fallthrough
             #else
-                #define FALL_THROUGH __attribute__ ((fallthrough));
+                #define FALL_THROUGH __attribute__((fallthrough));
             #endif
+            */
+            //#wenshei
         #endif
     #endif
     #endif /* FALL_THROUGH */
@@ -524,10 +529,9 @@ decouple library dependencies with standard string, memory and so on.
             #endif
             #if defined(WOLFSSL_DEOS)
                 #define XSTRNCASECMP(s1,s2,n) strnicmp((s1),(s2),(n))
-            #elif defined(WOLFSSL_CMSIS_RTOSv2)
-                #define XSTRNCASECMP(s1,s2,n) strncmp((s1),(s2),(n))
             #else
                 #define XSTRNCASECMP(s1,s2,n) strncasecmp((s1),(s2),(n))
+                //int strncasecmp(const char *s1, const char * s2, unsigned int sz); yqq
             #endif
         #endif
         #endif /* !XSTRNCASECMP */
