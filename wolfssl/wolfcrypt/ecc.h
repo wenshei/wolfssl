@@ -461,6 +461,9 @@ struct ecc_key {
 #endif
 };
 
+//@wenshei
+int strncasecmp(const char *s1, const char* s2 , size_t n);
+//#wenshei
 
 WOLFSSL_ABI WOLFSSL_API ecc_key* wc_ecc_key_new(void*);
 WOLFSSL_ABI WOLFSSL_API void wc_ecc_key_free(ecc_key*);
